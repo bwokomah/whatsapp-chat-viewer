@@ -19,19 +19,27 @@
   <script>
     const btn = document.getElementById("upload-btn");
     const status = document.getElementById("status");
-    btn.addEventListener("click", async () => {
+      btn.addEventListener("click", async () => {
       const file = document.getElementById("file").files[0];
       if (!file) { status.textContent = "Choose a file first."; return; }
-      status.textContent = "Uploading…";
+      status.textContent = "Uploading… (if the server was asleep this can take up to a minute)";
+      btn.disabled = true;
       const body = new FormData();
       body.append("file", file);
       try {
         const res = await fetch("/upload", { method: "POST", body });
-        const data = await res.json();
-        if (!res.ok) { status.textContent = data.detail || "Upload failed."; return; }
+        const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) {}
+        if (!res.ok || !data) {
+          status.textContent = (data && data.detail) || ("The server answered with status " + res.status + ". Please try again in a minute.");
+          return;
+        }
         window.location.href = data.url;
       } catch (e) {
-        status.textContent = "Upload failed. Is the server running?";
+        status.textContent = "Could not reach the server (" + e.name + "). If the file came from Google Drive or another cloud app, save it to your phone first and choose it again.";
+      } finally {
+        btn.disabled = false;
       }
     });
   </script>
