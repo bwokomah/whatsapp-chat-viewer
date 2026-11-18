@@ -39,11 +39,25 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
+EXT_TYPES = {
+    ".jpg": "image", ".jpeg": "image", ".png": "image", ".heic": "image",
+    ".mp4": "video", ".mov": "video", ".3gp": "video",
+    ".opus": "audio", ".m4a": "audio", ".mp3": "audio", ".aac": "audio", ".ogg": "audio", ".amr": "audio",
+    ".webp": "sticker", ".gif": "gif",
+    ".pdf": "document", ".docx": "document", ".xlsx": "document", ".pptx": "document", ".txt": "document",
+}
+
+
 def media_label(text: str) -> str:
-    """'sticker omitted' -> '🏷️ Sticker'"""
-    word = text.lower().replace("omitted", "").strip()
+    """'sticker omitted' -> '🏷️ Sticker', '<attached: x.jpg>' -> '📷 Image'"""
+    t = text.lower().strip()
+    m = re.search(r"<attached: ([^>]+)>", t) or re.search(r"(\S+) \(file attached\)", t)
+    if m:
+        word = EXT_TYPES.get(Path(m.group(1)).suffix, "attachment")
+    else:
+        word = t.replace("<", "").replace(">", "").replace("omitted", "").strip() or "media"
     icon = MEDIA_ICONS.get(word, "📎")
-    return f"{icon} {word.capitalize() or 'Media'}"
+    return f"{icon} {word.capitalize()}"
 
 
 def build_days(messages: list[dict], me: str) -> list[dict]:
@@ -160,7 +174,11 @@ async def upload(file: UploadFile = File(...)):
         raise HTTPException(400, f"Could not read file: {exc}")
     messages = parse_chat(raw)
     if not messages:
-        raise HTTPException(400, "No WhatsApp messages found in that file")
+        first = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")[:30]
+        raise HTTPException(
+            400,
+            "No WhatsApp messages found in that file. Its first line starts with: " + first,
+        )
     title = name.rsplit(".", 1)[0]
     chat_id = db.create_chat(title, messages)
     return {"chat_id": chat_id, "messages": len(messages), "url": f"/c/{chat_id}"}
