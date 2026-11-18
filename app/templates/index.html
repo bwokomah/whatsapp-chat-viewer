@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Chat Viewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="home">
+  <main class="card">
+    <h1>WhatsApp Chat Viewer</h1>
+    <p>Upload an exported WhatsApp chat (<code>.txt</code> or <code>.zip</code>) to read it as a chat and search it.</p>
+    <p class="hint">In WhatsApp: open a chat, tap the menu, choose <b>Export chat</b>, then <b>Without media</b>.</p>
+    <p class="hint">Privacy: your chat is stored temporarily and deleted automatically after {{ retention_hours }} hours. You can also delete it any time with the bin icon.</p>
+    <input type="file" id="file" accept=".txt,.zip">
+    <button id="upload-btn">Upload</button>
+    <p id="status" class="status"></p>
+  </main>
+  <script>
+    const btn = document.getElementById("upload-btn");
+    const status = document.getElementById("status");
+    btn.addEventListener("click", async () => {
+      const file = document.getElementById("file").files[0];
+      if (!file) { status.textContent = "Choose a file first."; return; }
+      status.textContent = "Uploading…";
+      const body = new FormData();
+      body.append("file", file);
+      try {
+        const res = await fetch("/upload", { method: "POST", body });
+        const data = await res.json();
+        if (!res.ok) { status.textContent = data.detail || "Upload failed."; return; }
+        window.location.href = data.url;
+      } catch (e) {
+        status.textContent = "Upload failed. Is the server running?";
+      }
+    });
+  </script>
+</body>
+</html>

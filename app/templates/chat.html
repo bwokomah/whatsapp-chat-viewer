@@ -1,0 +1,59 @@
+{% from "icons.html" import icon %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ chat.title }} – WhatsApp Chat Viewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+{% if not me %}
+<body class="home">
+  <main class="card">
+    <h1>Which one are you?</h1>
+    <p>Your messages will appear on the right in green.</p>
+    {% for s in senders %}
+      <a class="pick" href="/c/{{ chat.id }}?me={{ s | urlencode }}">{{ s }}</a>
+    {% endfor %}
+  </main>
+</body>
+{% else %}
+<body class="chat-page" data-chat-id="{{ chat.id }}">
+  <header class="topbar">
+    <a class="icon-btn" href="/" title="Home" aria-label="Home">{{ icon("back") }}</a>
+    <div class="avatar">{{ initial }}</div>
+    <div class="title">{{ header_name }}</div>
+    <button class="icon-btn" id="search-toggle" title="Search" aria-label="Search">{{ icon("search") }}</button>
+    <a class="pill-link" href="/c/{{ chat.id }}/document?me={{ me | urlencode }}">{{ icon("download") }}<span>Export</span></a>
+    <button class="icon-btn" id="delete-btn" title="Delete this chat" aria-label="Delete this chat">{{ icon("delete") }}</button>
+  </header>
+
+  <div class="searchbar" id="searchbar" hidden>
+    <input type="search" id="search-input" placeholder="Search messages" autocomplete="off">
+    <span id="search-count"></span>
+    <button class="icon-btn dark" id="prev-btn" title="Older match" aria-label="Older match">{{ icon("up") }}</button>
+    <button class="icon-btn dark" id="next-btn" title="Newer match" aria-label="Newer match">{{ icon("down") }}</button>
+  </div>
+
+  <main class="chat" id="chat">
+    {% for day in days %}
+      <section class="day">
+        <div class="date-pill"><span>{{ day.label }}</span></div>
+        {% for it in day["items"] %}
+          {% if it.type == "system" %}
+            <div class="system-pill" id="m-{{ it.idx }}"><span>{{ it.text }}</span></div>
+          {% else %}
+            <div class="row {{ 'mine' if it.mine else 'theirs' }}{{ ' first' if it.first else '' }}">
+              <div class="bubble {{ it.kind }}" id="m-{{ it.idx }}">
+                <span class="text">{{ it.text }}</span>
+                <span class="time">{{ it.time }}</span>
+              </div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% endfor %}
+  </main>
+  <script src="/static/chat.js"></script>
+</body>
+{% endif %}
+</html>

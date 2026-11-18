@@ -1,0 +1,4 @@
+chats.db
+venv/
+__pycache__/
+samples/

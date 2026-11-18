@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ chat.title }}</title>
+  <style>{{ css | safe }}</style>
+  <style>
+    body.export { display: block; height: auto; background: #efeae2; }
+    .toolbar { background: #f0f2f5; border-bottom: 1px solid #d1d7db; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .toolbar form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; }
+    .toolbar label { font-size: .85rem; color: #54656f; }
+    .toolbar input[type=date] { padding: 5px 8px; border: 1px solid #d1d7db; border-radius: 6px; }
+    .toolbar button, .toolbar a.btn { background: #008069; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font-size: .9rem; cursor: pointer; text-decoration: none; }
+    .toolbar a.plain { color: #008069; text-decoration: none; font-size: .9rem; }
+    .toolbar .spacer { flex: 1; }
+    .doc-head { max-width: 820px; margin: 0 auto; padding: 20px 16px 4px; }
+    .doc-head h1 { margin: 0; font-size: 1.4rem; color: #111b21; }
+    .doc-head p { margin: 4px 0 0; color: #667781; font-size: .9rem; }
+    .doc { max-width: 820px; margin: 0 auto; padding: 8px 16px 32px; }
+    .empty { text-align: center; color: #667781; padding: 40px 0; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @media print {
+      .no-print { display: none !important; }
+      .doc, .doc-head { max-width: none; padding-left: 0; padding-right: 0; }
+      .bubble, .date-pill, .system-pill, .row { break-inside: avoid; }
+      .date-pill { break-after: avoid; position: static; }
+      @page { margin: 14mm; }
+    }
+  </style>
+</head>
+<body class="export">
+  <div class="toolbar no-print">
+    {% if not standalone %}
+      <a class="plain" href="/c/{{ chat.id }}?me={{ me | urlencode }}">&larr; Back to chat</a>
+      <form method="get" action="/c/{{ chat.id }}/document">
+        <input type="hidden" name="me" value="{{ me }}">
+        <label>From <input type="date" name="start" value="{{ start }}"></label>
+        <label>To <input type="date" name="end" value="{{ end }}"></label>
+        <button type="submit">Apply</button>
+      </form>
+    {% endif %}
+    <span class="spacer"></span>
+    {% if not standalone %}
+      <a class="btn" href="/c/{{ chat.id }}/download?me={{ me | urlencode }}&start={{ start }}&end={{ end }}">Download HTML</a>
+    {% endif %}
+    <button type="button" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <header class="doc-head">
+    <h1>Chat with {{ header_name }}</h1>
+    {% if count %}
+      <p>{{ first_day }} &ndash; {{ last_day }} &middot; {{ count }} message{{ '' if count == 1 else 's' }}</p>
+    {% endif %}
+  </header>
+  <main class="doc">
+    {% if not days %}
+      <p class="empty">No messages in this date range.</p>
+    {% endif %}
+    {% for day in days %}
+      <section class="day">
+        <div class="date-pill"><span>{{ day.label }}</span></div>
+        {% for it in day["items"] %}
+          {% if it.type == "system" %}
+            <div class="system-pill"><span>{{ it.text }}</span></div>
+          {% else %}
+            <div class="row {{ 'mine' if it.mine else 'theirs' }}{{ ' first' if it.first else '' }}">
+              <div class="bubble {{ it.kind }}">
+                <span class="text">{{ it.text }}</span>
+                <span class="time">{{ it.time }}</span>
+              </div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% endfor %}
+  </main>
+</body>
+</html>
