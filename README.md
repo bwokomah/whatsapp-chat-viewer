@@ -6,7 +6,11 @@ Turn an exported WhatsApp chat (`.txt` or `.zip`) into a clean, searchable chat 
 
 > The demo runs on a free hosting plan. If nobody has used it for a while, the first visit can take up to a minute while the server wakes up.
 
-<!-- Add screenshots here, for example: ![Chat view](docs/chat.png) -->
+![Chat view](docs/chat.png)
+![Search](docs/search.png)
+![Export page](docs/export.png)
+![Export pdf](docs/exporttopdf.png)
+
 
 ## Features
 

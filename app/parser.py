@@ -120,6 +120,8 @@ def parse_chat(raw: str) -> list[Message]:
             messages.append(current)
         elif current is not None:
             current.text += "\n" + _clean(line)
+    for m in messages:  # drop blank lines left at the end of a message
+        m.text = m.text.rstrip()
     return messages
 
 
