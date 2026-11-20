@@ -63,3 +63,20 @@ mark { background: #ffe58f; color: inherit; border-radius: 2px; }
 .bubble.current { outline: 2px solid #00a884; }
 .bubble.flash, .system-pill.flash span { animation: flash 1.2s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 4px rgba(0,168,132,.5); } 100% { box-shadow: 0 1px 1px rgba(0,0,0,.13); } }
+
+
+
+/* ---------- pictures, video, audio, files ---------- */
+.bubble.has-media { padding: 3px; }
+.bubble.has-media .text:not(:empty) { display: block; padding: 4px 6px 0; }
+.bubble.has-media .time { margin: 4px 4px 0 10px; }
+.bubble.has-media::after { content: ""; display: block; clear: both; }
+.media-img { display: block; width: 260px; max-width: 100%; height: 260px; object-fit: cover; border-radius: 6px; background: #e9edef; }
+.media-video { display: block; width: 260px; max-width: 100%; height: 200px; background: #000; border-radius: 6px; }
+.media-audio { display: block; width: 250px; max-width: 100%; height: 40px; }
+.media-sticker { display: block; width: 140px; height: 140px; object-fit: contain; }
+.media-file { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-width: 200px; max-width: 280px; background: rgba(0,0,0,.05); border-radius: 6px; color: #111b21; text-decoration: none; overflow-wrap: anywhere; font-size: .9rem; }
+.media-file svg { width: 28px; height: 28px; fill: #667781; flex: 0 0 auto; }
+.row .bubble.mt-sticker { background: transparent; box-shadow: none; }
+.row.first .bubble.mt-sticker::before { display: none; }
+.bubble.mt-audio { min-width: 270px; }

@@ -16,6 +16,9 @@ IOS_RE = re.compile(rf"^\u200e?\[{_DATE},?\s{_TIME}\]\s?(.*)$")
 ANDROID_RE = re.compile(rf"^\u200e?{_DATE},?\s{_TIME}\s[-\u2013\u2014]\s(.*)$")
 SENDER_RE = re.compile(r"^([^:]+?):[ ]?(.*)$")
 
+ATTACHED_RE = re.compile(r"<attached:\s*([^>]+?)\s*>")           # iPhone
+FILE_ATTACHED_RE = re.compile(r"^(.+?)\s+\(file attached\)", re.M)  # Android
+
 SYSTEM_PHRASES = (
     "end-to-end encrypted",
     "disappearing messages",
@@ -35,6 +38,8 @@ class Message:
     sender: str
     text: str
     kind: str = "text"  # text | media | deleted | system
+    media: str = ""     # file name of an attached picture/video/audio/document, if any
+    caption: str = ""   # text sent together with the attachment
 
 
 def _clean(text: str) -> str:
@@ -53,6 +58,15 @@ def _kind(text: str) -> str:
         return "system"
     return "text"
 
+
+def _extract_media(text: str) -> tuple[str, str]:
+    """Return (file name, caption) for a message that has an attachment."""
+    for pattern in (ATTACHED_RE, FILE_ATTACHED_RE):
+        m = pattern.search(text)
+        if m:
+            caption = (text[: m.start()] + text[m.end():]).strip()
+            return m.group(1).strip(), caption
+    return "", ""
 
 def _detect_order(date_parts: list[tuple[str, str, str]]) -> str:
     """Work out whether dates are day-first ('dmy') or month-first ('mdy')."""
@@ -120,8 +134,10 @@ def parse_chat(raw: str) -> list[Message]:
             messages.append(current)
         elif current is not None:
             current.text += "\n" + _clean(line)
-    for m in messages:  # drop blank lines left at the end of a message
-        m.text = m.text.rstrip()
+    for m in messages:
+        m.text = m.text.rstrip()  # drop blank lines left at the end of a message
+        if m.kind == "media":
+            m.media, m.caption = _extract_media(m.text)
     return messages
 
 

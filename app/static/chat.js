@@ -90,4 +90,16 @@
     if (res.ok) window.location.href = "/";
     else alert("Could not delete this chat.");
   });
+
+  // If the browser can't play a voice note or video, offer a download link instead
+  document.addEventListener("error", e => {
+    const el = e.target;
+    if (!el || (el.tagName !== "AUDIO" && el.tagName !== "VIDEO")) return;
+    const link = document.createElement("a");
+    link.href = el.getAttribute("src");
+    link.className = "media-file";
+    link.download = "";
+    link.textContent = "Can't play this in your browser. Download it";
+    el.replaceWith(link);
+  }, true);
 })();

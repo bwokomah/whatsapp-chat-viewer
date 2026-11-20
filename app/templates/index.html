@@ -10,7 +10,7 @@
   <main class="card">
     <h1>WhatsApp Chat Viewer</h1>
     <p>Upload an exported WhatsApp chat (<code>.txt</code> or <code>.zip</code>) to read it as a chat and search it.</p>
-    <p class="hint">In WhatsApp: open a chat, tap the menu, choose <b>Export chat</b>, then <b>Without media</b>.</p>
+    <p class="hint">In WhatsApp: open a chat, tap the menu, choose <b>Export chat</b>, then <b>Attach media</b> to see pictures, videos and voice notes, or <b>Without media</b> for text only. Files can be up to {{ max_upload_mb }} MB.</p>
     <p class="hint">Privacy: your chat is stored temporarily and deleted automatically after {{ retention_hours }} hours. You can also delete it any time with the bin icon.</p>
     <input type="file" id="file" accept=".txt,.zip">
     <button id="upload-btn">Upload</button>
@@ -22,6 +22,10 @@
       btn.addEventListener("click", async () => {
       const file = document.getElementById("file").files[0];
       if (!file) { status.textContent = "Choose a file first."; return; }
+      if (file.size > {{ max_upload_mb }} * 1024 * 1024) {
+        status.textContent = "That file is over {{ max_upload_mb }} MB. Try a shorter chat or export it without media.";
+        return;
+      }
       status.textContent = "Uploading… (if the server was asleep this can take up to a minute)";
       btn.disabled = true;
       const body = new FormData();

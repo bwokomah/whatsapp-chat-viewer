@@ -43,7 +43,21 @@
             <div class="system-pill" id="m-{{ it.idx }}"><span>{{ it.text }}</span></div>
           {% else %}
             <div class="row {{ 'mine' if it.mine else 'theirs' }}{{ ' first' if it.first else '' }}">
-              <div class="bubble {{ it.kind }}" id="m-{{ it.idx }}">
+              <div class="bubble {{ it.kind }}{% if it.mtype %} has-media mt-{{ it.mtype }}{% endif %}" id="m-{{ it.idx }}">
+                {% if it.mtype %}
+                  {% set url = "/media/" ~ chat.id ~ "/" ~ (it.media | urlencode) %}
+                  {% if it.mtype == "image" %}
+                    <a href="{{ url }}" target="_blank" rel="noopener"><img class="media-img" src="{{ url }}" alt="Photo" loading="lazy"></a>
+                  {% elif it.mtype == "sticker" %}
+                    <img class="media-sticker" src="{{ url }}" alt="Sticker" loading="lazy">
+                  {% elif it.mtype == "video" %}
+                    <video class="media-video" controls preload="metadata" src="{{ url }}"></video>
+                  {% elif it.mtype == "audio" %}
+                    <audio class="media-audio" controls preload="none" src="{{ url }}"></audio>
+                  {% else %}
+                    <a class="media-file" href="{{ url }}">{{ icon("file") }}<span>{{ it.media }}</span></a>
+                  {% endif %}
+                {% endif %}
                 <span class="text">{{ it.text }}</span>
                 <span class="time">{{ it.time }}</span>
               </div>

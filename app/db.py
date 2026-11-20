@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+from app import media as media_files
 from app.parser import Message
 
 
@@ -39,6 +40,8 @@ def init_db() -> None:
                 sender  TEXT NOT NULL,
                 text    TEXT NOT NULL,
                 kind    TEXT NOT NULL,
+                media   TEXT NOT NULL DEFAULT '',
+                caption TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (chat_id, idx)
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -48,23 +51,41 @@ def init_db() -> None:
             );
             """
         )
+        # Databases created before media support need the two new columns
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+        for column in ("media", "caption"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
 
 
-def create_chat(title: str, messages: list[Message]) -> str:
-    chat_id = secrets.token_urlsafe(8)
+def new_chat_id() -> str:
+    return secrets.token_urlsafe(8)
+
+
+def create_chat(title: str, messages: list[Message], chat_id: str | None = None) -> str:
+    chat_id = chat_id or new_chat_id()
     now = datetime.now(timezone.utc).isoformat()
+    # Text messages are searchable, and so are the captions of pictures/videos
+    searchable = [
+        (m.text if m.kind == "text" else m.caption, chat_id, m.id)
+        for m in messages
+        if (m.kind == "text" and m.text) or (m.kind == "media" and m.media and m.caption)
+    ]
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO chats (id, title, created_at) VALUES (?, ?, ?)",
             (chat_id, title, now),
         )
         conn.executemany(
-            "INSERT INTO messages (chat_id, idx, ts, sender, text, kind) VALUES (?, ?, ?, ?, ?, ?)",
-            [(chat_id, m.id, m.timestamp.isoformat(), m.sender, m.text, m.kind) for m in messages],
+            "INSERT INTO messages (chat_id, idx, ts, sender, text, kind, media, caption) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (chat_id, m.id, m.timestamp.isoformat(), m.sender, m.text, m.kind, m.media, m.caption)
+                for m in messages
+            ],
         )
         conn.executemany(
-            "INSERT INTO messages_fts (text, chat_id, idx) VALUES (?, ?, ?)",
-            [(m.text, chat_id, m.id) for m in messages if m.kind == "text"],
+            "INSERT INTO messages_fts (text, chat_id, idx) VALUES (?, ?, ?)", searchable
         )
     return chat_id
 
@@ -75,7 +96,8 @@ def get_chat(chat_id: str) -> dict | None:
         if chat is None:
             return None
         rows = conn.execute(
-            "SELECT idx, ts, sender, text, kind FROM messages WHERE chat_id = ? ORDER BY idx",
+            "SELECT idx, ts, sender, text, kind, media, caption "
+            "FROM messages WHERE chat_id = ? ORDER BY idx",
             (chat_id,),
         ).fetchall()
     return {
@@ -83,6 +105,15 @@ def get_chat(chat_id: str) -> dict | None:
         "title": chat["title"],
         "messages": [dict(r) for r in rows],
     }
+
+
+def has_media(chat_id: str, name: str) -> bool:
+    """True only if this exact file belongs to a message in this chat."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM messages WHERE chat_id = ? AND media = ? LIMIT 1", (chat_id, name)
+        ).fetchone()
+    return row is not None
 
 
 def _fts_query(q: str) -> str:
@@ -118,7 +149,10 @@ def delete_chat(chat_id: str) -> bool:
         conn.execute("DELETE FROM messages_fts WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         cur = conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-        return cur.rowcount > 0
+        deleted = cur.rowcount > 0
+    media_files.remove_chat_media(chat_id)
+    return deleted
+
 
 def purge_old_chats(max_age_hours: int = 24) -> int:
     """Delete every chat older than max_age_hours. Returns how many were removed."""

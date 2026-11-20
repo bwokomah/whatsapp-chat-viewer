@@ -18,6 +18,8 @@
     .doc-head h1 { margin: 0; font-size: 1.4rem; color: #111b21; }
     .doc-head p { margin: 4px 0 0; color: #667781; font-size: .9rem; }
     .doc { max-width: 820px; margin: 0 auto; padding: 8px 16px 32px; }
+    .media-img { height: auto; max-height: 320px; object-fit: contain; }
+    .media-note { display: block; padding: 2px 6px 4px; font-style: italic; color: #54656f; }
     .empty { text-align: center; color: #667781; padding: 40px 0; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     @media print {
@@ -65,7 +67,14 @@
             <div class="system-pill"><span>{{ it.text }}</span></div>
           {% else %}
             <div class="row {{ 'mine' if it.mine else 'theirs' }}{{ ' first' if it.first else '' }}">
-              <div class="bubble {{ it.kind }}">
+              <div class="bubble {{ it.kind }}{% if it.mtype %} has-media mt-{{ it.mtype }}{% endif %}">
+                {% if it.mtype %}
+                  {% if it.src %}
+                    <img class="{{ 'media-sticker' if it.mtype == 'sticker' else 'media-img' }}" src="{{ it.src }}" alt="">
+                  {% else %}
+                    <span class="media-note">{{ it.label }}</span>
+                  {% endif %}
+                {% endif %}
                 <span class="text">{{ it.text }}</span>
                 <span class="time">{{ it.time }}</span>
               </div>

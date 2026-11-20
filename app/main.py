@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 from contextlib import asynccontextmanager
@@ -5,26 +6,22 @@ from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import db
+from app import media as media_files
 from app.parser import parse_chat, read_upload
 
 BASE_DIR = Path(__file__).parent
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+MB = 1024 * 1024
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * MB
+MAX_MEDIA_FILE_BYTES = int(os.environ.get("MAX_MEDIA_FILE_MB", "30")) * MB   # one picture/video
+MAX_MEDIA_TOTAL_BYTES = int(os.environ.get("MAX_MEDIA_TOTAL_MB", "150")) * MB  # all media in one chat
+EMBED_BUDGET_BYTES = 20 * MB  # pictures embedded in a downloaded HTML file
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
-
-MEDIA_ICONS = {
-    "image": "📷",
-    "video": "🎥",
-    "audio": "🎤",
-    "sticker": "🏷️",
-    "gif": "🎞️",
-    "document": "📄",
-    "contact card": "👤",
-}
 
 
 @asynccontextmanager
@@ -39,25 +36,20 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
-EXT_TYPES = {
-    ".jpg": "image", ".jpeg": "image", ".png": "image", ".heic": "image",
-    ".mp4": "video", ".mov": "video", ".3gp": "video",
-    ".opus": "audio", ".m4a": "audio", ".mp3": "audio", ".aac": "audio", ".ogg": "audio", ".amr": "audio",
-    ".webp": "sticker", ".gif": "gif",
-    ".pdf": "document", ".docx": "document", ".xlsx": "document", ".pptx": "document", ".txt": "document",
-}
-
-
 def media_label(text: str) -> str:
-    """'sticker omitted' -> '🏷️ Sticker', '<attached: x.jpg>' -> '📷 Image'"""
+    """Placeholder for an attachment we don't have: 'sticker omitted' -> '🏷️ Sticker'."""
     t = text.lower().strip()
     m = re.search(r"<attached: ([^>]+)>", t) or re.search(r"(\S+) \(file attached\)", t)
     if m:
-        word = EXT_TYPES.get(Path(m.group(1)).suffix, "attachment")
+        kind = media_files.kind_of(m.group(1)) or "file"
     else:
-        word = t.replace("<", "").replace(">", "").replace("omitted", "").strip() or "media"
-    icon = MEDIA_ICONS.get(word, "📎")
-    return f"{icon} {word.capitalize()}"
+        word = t.replace("<", "").replace(">", "").replace("omitted", "").strip()
+        kind = {"document": "file", "gif": "image"}.get(word, word)
+    return media_files.KIND_LABELS.get(kind, "📎 " + (kind.capitalize() or "Media"))
+
+
+def long_date(d: date) -> str:
+    return f"{d:%B} {d.day}, {d.year}"
 
 
 def build_days(messages: list[dict], me: str) -> list[dict]:
@@ -77,9 +69,18 @@ def build_days(messages: list[dict], me: str) -> list[dict]:
             current["items"].append({"type": "system", "idx": m["idx"], "text": m["text"]})
             last_sender = None
             continue
-        text = media_label(m["text"]) if m["kind"] == "media" else m["text"]
-        if m["kind"] == "deleted":
+
+        media = m.get("media") or ""
+        mtype = media_files.kind_of(media) if media and m["kind"] == "media" else ""
+        if mtype:  # we have the actual file: show it, with its caption underneath
+            text = m.get("caption", "")
+        elif m["kind"] == "media":  # no file: show a labelled placeholder
+            text = media_label(m["text"])
+        elif m["kind"] == "deleted":
             text = "🚫 " + m["text"]
+        else:
+            text = m["text"]
+
         hour = ts.hour % 12 or 12
         current["items"].append(
             {
@@ -90,10 +91,41 @@ def build_days(messages: list[dict], me: str) -> list[dict]:
                 "kind": m["kind"],
                 "text": text,
                 "time": f"{hour}:{ts:%M} {ts:%p}",
+                "media": media if mtype else "",
+                "mtype": mtype,
+                "label": media_files.KIND_LABELS.get(mtype, ""),
             }
         )
         last_sender = m["sender"]
     return days
+
+
+def prepare_export_media(days: list[dict], chat_id: str, standalone: bool) -> None:
+    """
+    Printed/downloaded documents can't play audio or video, so only pictures are shown.
+    On the page, pictures load from the server. In a downloaded file they are embedded
+    (up to a size budget) so the file still works offline.
+    """
+    budget = EMBED_BUDGET_BYTES
+    for day in days:
+        for it in day["items"]:
+            if it.get("type") != "msg" or not it["mtype"]:
+                continue
+            it["src"] = ""
+            if it["mtype"] not in ("image", "sticker"):
+                continue
+            if not standalone:
+                it["src"] = f"/media/{chat_id}/{it['media']}"
+                continue
+            path = media_files.chat_dir(chat_id) / it["media"]
+            try:
+                size = path.stat().st_size
+                if size <= budget:
+                    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+                    it["src"] = f"data:{media_files.mime_of(it['media'])};base64,{encoded}"
+                    budget -= size
+            except OSError:
+                pass
 
 
 def get_senders(messages: list[dict]) -> list[str]:
@@ -121,11 +153,9 @@ def filter_by_date(messages: list[dict], start: date | None, end: date | None) -
     return out
 
 
-def long_date(d: date) -> str:
-    return f"{d:%B} {d.day}, {d.year}"
-
-
-def document_context(chat_id: str, me: str | None, start: str | None, end: str | None):
+def document_context(
+    chat_id: str, me: str | None, start: str | None, end: str | None, standalone: bool = False
+):
     """Everything the export page needs, or None if `me` isn't one of the senders."""
     chat = db.get_chat(chat_id)
     if chat is None:
@@ -136,26 +166,30 @@ def document_context(chat_id: str, me: str | None, start: str | None, end: str |
     start_d, end_d = parse_day(start), parse_day(end)
     msgs = filter_by_date(chat["messages"], start_d, end_d)
     others = [s for s in senders if s != me]
-    days = [datetime.fromisoformat(m["ts"]).date() for m in msgs]
+    days_seen = [datetime.fromisoformat(m["ts"]).date() for m in msgs]
+    days = build_days(msgs, me)
+    prepare_export_media(days, chat_id, standalone)
     return {
         "chat": chat,
         "me": me,
         "header_name": others[0] if len(others) == 1 else chat["title"],
-        "days": build_days(msgs, me),
+        "days": days,
         "count": sum(1 for m in msgs if m["kind"] != "system"),
-        "first_day": long_date(days[0]) if days else "",
-        "last_day": long_date(days[-1]) if days else "",
+        "first_day": long_date(days_seen[0]) if days_seen else "",
+        "last_day": long_date(days_seen[-1]) if days_seen else "",
         "start": start_d.isoformat() if start_d else "",
         "end": end_d.isoformat() if end_d else "",
         "css": (BASE_DIR / "static" / "style.css").read_text(encoding="utf-8"),
-        "standalone": False,
+        "standalone": standalone,
     }
 
 
 @app.get("/")
 def home(request: Request):
     return templates.TemplateResponse(
-        request, "index.html", {"retention_hours": RETENTION_HOURS}
+        request,
+        "index.html",
+        {"retention_hours": RETENTION_HOURS, "max_upload_mb": MAX_UPLOAD_MB},
     )
 
 
@@ -164,7 +198,7 @@ async def upload(file: UploadFile = File(...)):
     db.purge_old_chats(RETENTION_HOURS)
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "File too large (max 25 MB)")
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_MB} MB)")
     name = file.filename or "chat.txt"
     if not name.lower().endswith((".txt", ".zip")):
         raise HTTPException(400, "Please upload a .txt or .zip WhatsApp export")
@@ -179,9 +213,50 @@ async def upload(file: UploadFile = File(...)):
             400,
             "No WhatsApp messages found in that file. Its first line starts with: " + first,
         )
+
+    chat_id = db.new_chat_id()
+    wanted = {m.media for m in messages if m.media}
+    saved: dict[str, str] = {}
+    if wanted and name.lower().endswith(".zip"):
+        saved = media_files.save_from_zip(
+            data, chat_id, wanted, MAX_MEDIA_FILE_BYTES, MAX_MEDIA_TOTAL_BYTES
+        )
+    for m in messages:  # messages whose file we don't have fall back to a placeholder
+        m.media = saved.get(m.media, "") if m.media else ""
+
     title = name.rsplit(".", 1)[0]
-    chat_id = db.create_chat(title, messages)
-    return {"chat_id": chat_id, "messages": len(messages), "url": f"/c/{chat_id}"}
+    try:
+        db.create_chat(title, messages, chat_id)
+    except Exception:
+        media_files.remove_chat_media(chat_id)
+        raise
+    return {
+        "chat_id": chat_id,
+        "messages": len(messages),
+        "media": len(saved),
+        "url": f"/c/{chat_id}",
+    }
+
+
+@app.get("/media/{chat_id}/{name}")
+def media_file(chat_id: str, name: str):
+    # Only files that belong to a message in this chat are ever served
+    if not db.has_media(chat_id, name):
+        raise HTTPException(404, "Not found")
+    path = media_files.chat_dir(chat_id) / name
+    if not path.is_file():
+        raise HTTPException(404, "Not found")
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"}
+    kind = media_files.kind_of(name)
+    if kind in ("image", "sticker", "video", "audio"):
+        return FileResponse(path, media_type=media_files.mime_of(name), headers=headers)
+    return FileResponse(
+        path,
+        media_type=media_files.mime_of(name),
+        filename=name,
+        content_disposition_type="attachment",
+        headers=headers,
+    )
 
 
 @app.get("/c/{chat_id}")
@@ -227,10 +302,9 @@ def download_document(
     request: Request, chat_id: str, me: str | None = None,
     start: str | None = None, end: str | None = None,
 ):
-    ctx = document_context(chat_id, me, start, end)
+    ctx = document_context(chat_id, me, start, end, standalone=True)
     if ctx is None:
         return RedirectResponse(f"/c/{chat_id}")
-    ctx["standalone"] = True  # the saved file has no server links
     filename = re.sub(r"[^A-Za-z0-9_-]+", "_", ctx["chat"]["title"]).strip("_") or "whatsapp-chat"
     response = templates.TemplateResponse(request, "export.html", ctx)
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}.html"'
