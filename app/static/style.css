@@ -80,3 +80,13 @@ mark { background: #ffe58f; color: inherit; border-radius: 2px; }
 .row .bubble.mt-sticker { background: transparent; box-shadow: none; }
 .row.first .bubble.mt-sticker::before { display: none; }
 .bubble.mt-audio { min-width: 270px; }
+
+
+/* ---------- "open without media?" prompt ---------- */
+.status.info { color: #54656f; }
+.choice { background: #f0f2f5; border-radius: 10px; padding: 14px; margin-top: 16px; }
+.choice p { margin: 0 0 12px; font-size: .95rem; }
+.choice[hidden] { display: none; }
+.card button.secondary { background: transparent; color: #008069; border: 1px solid #008069; margin-left: 6px; }
+.card button.secondary:hover { background: rgba(0,128,105,.08); }
+.card button:disabled { opacity: .6; cursor: default; }

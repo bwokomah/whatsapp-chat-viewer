@@ -10,38 +10,148 @@
   <main class="card">
     <h1>WhatsApp Chat Viewer</h1>
     <p>Upload an exported WhatsApp chat (<code>.txt</code> or <code>.zip</code>) to read it as a chat and search it.</p>
-    <p class="hint">In WhatsApp: open a chat, tap the menu, choose <b>Export chat</b>, then <b>Attach media</b> to see pictures, videos and voice notes, or <b>Without media</b> for text only. Files can be up to {{ max_upload_mb }} MB.</p>
+    <p class="hint">In WhatsApp: open a chat, tap the menu, choose <b>Export chat</b>, then <b>Attach media</b> to see pictures, videos and voice notes, or <b>Without media</b> for text only. Files with media can be up to {{ max_upload_mb }} MB. Bigger zip files can still be opened without their media.</p>
     <p class="hint">Privacy: your chat is stored temporarily and deleted automatically after {{ retention_hours }} hours. You can also delete it any time with the bin icon.</p>
     <input type="file" id="file" accept=".txt,.zip">
     <button id="upload-btn">Upload</button>
+
+    <div id="choice" class="choice" hidden>
+      <p id="choice-text"></p>
+      <button id="choice-yes" type="button">Yes, open without media</button>
+      <button id="choice-no" type="button" class="secondary">No, cancel</button>
+    </div>
+
     <p id="status" class="status"></p>
   </main>
+
   <script>
+    const MAX_MB = {{ max_upload_mb }};
+    const MAX_BYTES = MAX_MB * 1024 * 1024;
+    const fileInput = document.getElementById("file");
     const btn = document.getElementById("upload-btn");
     const status = document.getElementById("status");
-      btn.addEventListener("click", async () => {
-      const file = document.getElementById("file").files[0];
-      if (!file) { status.textContent = "Choose a file first."; return; }
-      if (file.size > {{ max_upload_mb }} * 1024 * 1024) {
-        status.textContent = "That file is over {{ max_upload_mb }} MB. Try a shorter chat or export it without media.";
+    const choice = document.getElementById("choice");
+    const choiceText = document.getElementById("choice-text");
+
+    const say = (msg, isError) => { status.textContent = msg; status.className = isError ? "status" : "status info"; };
+    const mb = bytes => Math.round(bytes / 1024 / 1024);
+    const isZip = f => f.name.toLowerCase().endsWith(".zip");
+
+    function askAboutMedia(reason) {
+      choiceText.textContent = reason + " Do you want to open it without media? The pictures, videos and voice notes will show as labels, but every message will be there.";
+      choice.hidden = false;
+      say("");
+    }
+
+    async function send(blob, name) {
+      const body = new FormData();
+      body.append("file", blob, name);
+      const res = await fetch("/upload", { method: "POST", body });
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) {}
+      return { res, data };
+    }
+
+    // Reads just the chat text out of a zip, right here in the browser.
+    // A zip keeps a list of its files at the end, so we never have to load the whole (huge) file.
+    async function readChatFromZip(file) {
+      const u16 = (v, o) => v.getUint16(o, true);
+      const u32 = (v, o) => v.getUint32(o, true);
+      const tooBig = "This zip is too large to read in the browser. Please export the chat without media instead.";
+
+      // 1. Find the end-of-central-directory record in the last 64 KB of the file
+      const tailSize = Math.min(file.size, 65557);
+      const tail = new DataView(await file.slice(file.size - tailSize, file.size).arrayBuffer());
+      let eocd = -1;
+      for (let i = tail.byteLength - 22; i >= 0; i--) {
+        if (u32(tail, i) === 0x06054b50) { eocd = i; break; }
+      }
+      if (eocd < 0) throw new Error("That doesn't look like a valid zip file.");
+      const entries = u16(tail, eocd + 10);
+      const cdSize = u32(tail, eocd + 12);
+      const cdOffset = u32(tail, eocd + 16);
+      if (entries === 0xFFFF || cdSize === 0xFFFFFFFF || cdOffset === 0xFFFFFFFF) throw new Error(tooBig);
+
+      // 2. Read the list of files and pick the chat text (the biggest .txt)
+      const cd = new DataView(await file.slice(cdOffset, cdOffset + cdSize).arrayBuffer());
+      const decoder = new TextDecoder();
+      let best = null;
+      let pos = 0;
+      while (pos + 46 <= cd.byteLength && u32(cd, pos) === 0x02014b50) {
+        const method = u16(cd, pos + 10);
+        const compSize = u32(cd, pos + 20);
+        const size = u32(cd, pos + 24);
+        const nameLen = u16(cd, pos + 28);
+        const extraLen = u16(cd, pos + 30);
+        const commentLen = u16(cd, pos + 32);
+        const offset = u32(cd, pos + 42);
+        const name = decoder.decode(new Uint8Array(cd.buffer, cd.byteOffset + pos + 46, nameLen));
+        if (name.toLowerCase().endsWith(".txt") && !name.startsWith("__MACOSX") && (!best || size > best.size)) {
+          best = { method, compSize, size, offset };
+        }
+        pos += 46 + nameLen + extraLen + commentLen;
+      }
+      if (!best) throw new Error("No chat (.txt) file found inside that zip.");
+      if (best.compSize === 0xFFFFFFFF || best.offset === 0xFFFFFFFF) throw new Error(tooBig);
+
+      // 3. Read only that one file out of the zip
+      const local = new DataView(await file.slice(best.offset, best.offset + 30).arrayBuffer());
+      const dataStart = best.offset + 30 + u16(local, 26) + u16(local, 28);
+      const raw = file.slice(dataStart, dataStart + best.compSize);
+      if (best.method === 0) return raw;
+      if (best.method !== 8) throw new Error("This zip uses a compression type the browser can't open.");
+      if (typeof DecompressionStream === "undefined") {
+        throw new Error("Your browser can't open large zips here. Please export the chat without media instead.");
+      }
+      return await new Response(raw.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
+    }
+
+    fileInput.addEventListener("change", () => { choice.hidden = true; say(""); });
+
+    btn.addEventListener("click", async () => {
+      choice.hidden = true;
+      const file = fileInput.files[0];
+      if (!file) { say("Choose a file first.", true); return; }
+      if (file.size > MAX_BYTES) {
+        if (isZip(file)) askAboutMedia("This file is " + mb(file.size) + " MB, and files with media can be up to " + MAX_MB + " MB.");
+        else say("That file is over " + MAX_MB + " MB.", true);
         return;
       }
-      status.textContent = "Uploading… (if the server was asleep this can take up to a minute)";
+      say("Uploading… (if the server was asleep this can take up to a minute)");
       btn.disabled = true;
-      const body = new FormData();
-      body.append("file", file);
       try {
-        const res = await fetch("/upload", { method: "POST", body });
-        const text = await res.text();
-        let data = null;
-        try { data = JSON.parse(text); } catch (e) {}
-        if (!res.ok || !data) {
-          status.textContent = (data && data.detail) || ("The server answered with status " + res.status + ". Please try again in a minute.");
-          return;
-        }
-        window.location.href = data.url;
+        const { res, data } = await send(file, file.name);
+        if (res.ok && data) { window.location.href = data.url; return; }
+        if (res.status === 413 && isZip(file)) { askAboutMedia("The server couldn't accept this file with its media."); return; }
+        say((data && data.detail) || "The server answered with status " + res.status + ". Please try again in a minute.", true);
       } catch (e) {
-        status.textContent = "Could not reach the server (" + e.name + "). If the file came from Google Drive or another cloud app, save it to your phone first and choose it again.";
+        if (isZip(file) && file.size > 10 * 1024 * 1024) {
+          askAboutMedia("The upload didn't go through, which can happen with big files.");
+        } else {
+          say("Could not reach the server (" + e.name + "). If the file came from Google Drive or another cloud app, save it to your phone first and choose it again.", true);
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("choice-no").addEventListener("click", () => { choice.hidden = true; say(""); });
+
+    document.getElementById("choice-yes").addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      choice.hidden = true;
+      btn.disabled = true;
+      try {
+        say("Reading the chat from your zip. The pictures and videos stay on your device…");
+        const chat = await readChatFromZip(file);
+        if (chat.size > MAX_BYTES) { say("The chat text alone is over " + MAX_MB + " MB, which is too big.", true); return; }
+        say("Uploading the chat…");
+        const { res, data } = await send(chat, file.name.replace(/\.zip$/i, "") + ".txt");
+        if (res.ok && data) { window.location.href = data.url; return; }
+        say((data && data.detail) || "The server answered with status " + res.status + ". Please try again in a minute.", true);
+      } catch (e) {
+        say(e.message || "Something went wrong while reading that zip.", true);
       } finally {
         btn.disabled = false;
       }
