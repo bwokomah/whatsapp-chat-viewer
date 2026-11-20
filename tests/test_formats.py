@@ -73,3 +73,7 @@ def test_noon_and_midnight():
 
 def test_garbage_gives_no_messages():
     assert parse_chat("hello\nthis is not a chat\n") == []
+
+def test_trailing_blank_lines_are_not_part_of_the_last_message():
+    m = parse_chat("[1/1/26, 1:00:00\u202fAM] A: first\n\n[1/1/26, 1:01:00\u202fAM] B: last\n\n")
+    assert m[0].text == "first" and m[1].text == "last"
